@@ -1,0 +1,27 @@
+{
+  "name": "jtbd-interview-agent",
+  "version": "1.0.0",
+  "description": "JTBD Interview Agent using Claude Agent SDK with Bob Moesta methodology",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=packages/web",
+    "build": "npm run build --workspaces",
+    "build:agent": "npm run build --workspace=packages/agent",
+    "build:web": "npm run build --workspace=packages/web",
+    "lint": "npm run lint --workspaces",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "keywords": [
+    "jtbd",
+    "jobs-to-be-done",
+    "interview",
+    "bob-moesta",
+    "claude",
+    "ai-agent"
+  ],
+  "author": "",
+  "license": "MIT"
+}
