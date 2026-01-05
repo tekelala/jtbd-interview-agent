@@ -2,28 +2,18 @@
  * JTBD Interviewer
  *
  * Main class that conducts Jobs to Be Done interviews using
- * the Claude Agent SDK with Bob Moesta Skills.
+ * the Anthropic SDK with Bob Moesta's methodology embedded.
  */
 
-import { query } from '@anthropic-ai/claude-agent-sdk';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import Anthropic from '@anthropic-ai/sdk';
 import type {
   InterviewConfig,
   InterviewData,
   InterviewPhase,
   InterviewSummary,
   Insight,
-  TimelineEvent,
-  Force,
-  DietProfile,
-  ForcesOfProgress
+  Force
 } from './types/interview.js';
-
-// Get project root (where .claude/skills/ is located)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = path.resolve(__dirname, '../../..');  // packages/agent/src -> project root
 
 export interface Message {
   role: 'user' | 'assistant';
@@ -61,14 +51,15 @@ export const CLAUDE_MODELS: { id: ClaudeModel; name: string; description: string
 ];
 
 export class JTBDInterviewer {
+  private client: Anthropic;
   private model: string;
   private conversationHistory: Message[] = [];
   private interviewData: InterviewData;
   private currentPhase: InterviewPhase = 'setup';
   private productContext?: string;
-  private sessionId?: string;
 
   constructor(config: InterviewerConfig = {}) {
+    this.client = new Anthropic(); // Uses ANTHROPIC_API_KEY env var
     this.model = config.model || 'claude-sonnet-4-20250514';
     this.interviewData = this.createEmptyInterviewData();
   }
@@ -154,88 +145,141 @@ export class JTBDInterviewer {
   }
 
   /**
-   * Query Claude using the Agent SDK with Skills enabled
+   * Query Claude using the direct Anthropic SDK
    */
   private async queryWithSkills(prompt: string): Promise<string> {
-    let response = '';
-
     try {
-      for await (const message of query({
-        prompt,
-        options: {
-          model: this.model,
-          cwd: PROJECT_ROOT,  // Project root where .claude/skills/ is located
-          settingSources: ['user', 'project'],  // Load Skills from both locations
-          allowedTools: ['Skill', 'Read'],  // Enable Skill tool
-          systemPrompt: this.buildSystemPrompt(),
-          permissionMode: 'bypassPermissions'  // For non-interactive use
-        }
-      })) {
-        // Handle different message types
-        if (message.type === 'assistant') {
-          // Extract text content from assistant message
-          const content = message.message.content;
-          if (Array.isArray(content)) {
-            for (const block of content) {
-              if (block.type === 'text') {
-                response += block.text;
-              }
-            }
-          }
-        } else if (message.type === 'result') {
-          // Store session ID for resume capability
-          this.sessionId = message.session_id;
+      // Build message history for context
+      const messages = this.buildMessageHistory(prompt);
 
-          // If result has content, use it
-          if (message.subtype === 'success' && message.result) {
-            if (!response) {
-              response = message.result;
-            }
-          }
-        }
+      const response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 1024,
+        system: this.buildSystemPrompt(),
+        messages
+      });
+
+      // Extract text from response
+      const textContent = response.content.find(block => block.type === 'text');
+      if (textContent && textContent.type === 'text') {
+        return textContent.text;
       }
+
+      return 'I apologize, but I was unable to generate a response. Could you please try again?';
     } catch (error) {
-      console.error('SDK query error:', error);
+      console.error('Anthropic API error:', error);
       throw error;
     }
-
-    return response || 'I apologize, but I was unable to generate a response. Could you please try again?';
   }
 
   /**
-   * Build the system prompt for JTBD interviews
+   * Build message history for the API call
+   */
+  private buildMessageHistory(currentPrompt: string): Array<{ role: 'user' | 'assistant'; content: string }> {
+    // Convert conversation history to API format
+    const messages: Array<{ role: 'user' | 'assistant'; content: string }> = this.conversationHistory.map(msg => ({
+      role: msg.role,
+      content: msg.content
+    }));
+
+    // Add current prompt as user message
+    messages.push({ role: 'user', content: currentPrompt });
+
+    return messages;
+  }
+
+  /**
+   * Build the system prompt for JTBD interviews - Bob Moesta methodology embedded
    */
   private buildSystemPrompt(): string {
     let prompt = `You are conducting a Jobs to Be Done interview following Bob Moesta's methodology.
 
-CRITICAL BEHAVIOR RULES:
+## CRITICAL BEHAVIOR RULES
 - BE CONCISE: Your responses should be 1-3 sentences MAX. No long explanations.
 - ONE QUESTION: Ask only ONE question per response. Never multiple questions.
-- NO ROLEPLAY: Never use asterisks for actions like *pauses* or *leans in*. Just speak naturally.
-- TALK LESS: The interviewee should talk 80%+ of the time. You ask short questions, they give long answers.
-- NO LECTURING: Don't explain JTBD methodology to them. Just conduct the interview.
-- FOLLOW THEIR LEAD: Your next question comes from what they just said.
+- NO ROLEPLAY: Never use asterisks for actions. Just speak naturally.
+- TALK LESS: The interviewee should talk 80%+ of the time.
+- FOLLOW THEIR LEAD: "The best question comes from the last answer."
 
-INTERVIEW GOALS:
-1. Uncover the STRUGGLING MOMENT that caused them to seek a solution
-2. Map the FORCES OF PROGRESS (push, pull, anxiety, habit)
-3. Understand their INFORMATION DIET (how to reach similar people)
+## BOB MOESTA'S CORE PHILOSOPHY
+- People don't buy products—they hire them to make progress
+- The struggling moment is the seed of all innovation
+- Focus on causation, not correlation—context creates behavior
+- When the answer feels irrational, you don't know the whole story
 
-QUESTIONING STYLE:
-- Ask "what happened" not "why"
-- Get specific: "Was that a Monday or Tuesday?" "Morning or evening?"
-- Build the timeline backward from purchase
-- Use contrast: "How was it different from before?"
-- Unpack vague words: "When you say 'frustrated', what do you mean?"
+## FIVE TECHNIQUES FOR EXTRACTING PERSPECTIVE
 
-EXAMPLE GOOD RESPONSES:
-- "Interesting. So what happened next?"
-- "When you say she was struggling, what did that actually look like?"
-- "Take me back to that moment. What time of day was it?"
-- "And before that evening, had you thought about getting help for her focus?"`;
+### 1. CONTEXT
+Dig for the full picture. The irrational becomes rational with context.
+- "What else was happening in your life at that time?"
+- "Walk me through that day..."
+- "What was going on that made you think about it?"
+
+### 2. CONTRAST
+People can't articulate abstracts but can identify through comparison.
+- "Why X and not Y?"
+- "What was different about this time?"
+- "You said it was hard—compared to what?"
+
+### 3. UNPACKING
+Words mean different things to different people.
+- "When you say 'frustrated,' what does that look like?"
+- "Help me understand what you mean by 'better'..."
+- "Unpack that for me..."
+
+### 4. ENERGY
+Listen for HOW they say it, not just WHAT. Watch for emphasis, speed changes, emotional words.
+- When you detect energy: "Wait, tell me more about that"
+- "I heard something in your voice—what's behind that?"
+
+### 5. ANALOGIES
+When people hit a wall, give them another frame.
+- "Is it more like X or Y?"
+- "What's the closest thing to this you've experienced before?"
+
+## TIMELINE BUILDING
+Build backward from the purchase/decision:
+1. First thought - "When did you first think about this?"
+2. Trigger - "What was the moment you realized something had to change?"
+3. Passive looking - "When did you start noticing alternatives?"
+4. Active searching - "When did you start actually looking?"
+5. Decision - "What made you decide?"
+6. Almost stopped - "What almost held you back?"
+7. First use - "What was the first experience like?"
+
+Get specific: What day? Who was there? What else did you buy? Morning or evening?
+
+## FORCES OF PROGRESS
+Map these four forces:
+- PUSH: "What wasn't working? What frustrated you? What were you putting up with?"
+- PULL: "What attracted you? What did you imagine life would be like after?"
+- ANXIETY: "What concerns did you have? What almost made you not do it?"
+- HABIT: "What was working about the old way? Why did you wait so long?"
+
+## COMPLEMENTARY TECHNIQUES (Chris Voss)
+- Mirror: Repeat their last 1-3 words to encourage elaboration
+- Label: "It sounds like..." "It seems like..." to validate and go deeper
+- Calibrated questions: Use "How" and "What" instead of "Why"
+
+## COMMON MISTAKES TO AVOID
+- Don't ask "why" directly—ask "what happened"
+- Don't accept the first answer—dig deeper
+- Don't lead the witness—stay neutral and curious
+- Don't talk too much—if you're talking more than 20%, you're doing it wrong
+- Don't follow a script—let the conversation flow naturally
+- Don't focus on the product—focus on their life and struggle
+
+## STAY ON TRACK - CRITICAL
+- This interview is about ONE specific purchase/decision. Stay focused on it.
+- If they go off topic, gently redirect: "Let's come back to [the original purchase]..."
+- DON'T explore tangents unless they directly explain THIS decision.`;
 
     if (this.productContext) {
-      prompt += `\n\nProduct Context: The interview relates to ${this.productContext}`;
+      prompt += `
+
+## INTERVIEW CONTEXT
+This interview is specifically about: ${this.productContext}
+Stay focused on THIS purchase decision throughout the interview.`;
     }
 
     return prompt;
@@ -270,16 +314,26 @@ Don't explain the methodology or what you're looking for - just start the conver
       .map(msg => `${msg.role === 'user' ? 'Interviewee' : 'Interviewer'}: ${msg.content}`)
       .join('\n\n');
 
-    return `Previous conversation:
+    let prompt = '';
+
+    // Add product context reminder at the top
+    if (this.productContext) {
+      prompt += `REMEMBER: This interview is about ${this.productContext}.
+Stay focused on THIS specific purchase. If they mention personal experiences, redirect back to the original topic.\n\n`;
+    }
+
+    prompt += `Previous conversation:
 ${context}
 
 The interviewee just said: "${userMessage}"
 
-Continue the JTBD interview following Bob Moesta's methodology.
-- Dig deeper into their response
+Continue the JTBD interview:
+- Dig deeper into their response about the purchase
 - Look for struggling moments, forces of progress, or diet/lifestyle information
-- Ask follow-up questions that come from what they just said
-- Remember: the best question comes from the last answer`;
+- Ask ONE follow-up question that comes from what they just said
+- If they went off topic, gently redirect back to the original purchase`;
+
+    return prompt;
   }
 
   /**
@@ -291,7 +345,11 @@ Continue the JTBD interview following Bob Moesta's methodology.
     // Detect struggling moment keywords
     if (input.includes('frustrated') || input.includes('problem') ||
         input.includes('struggle') || input.includes('wasn\'t working') ||
-        input.includes('fed up') || input.includes('couldn\'t')) {
+        input.includes('fed up') || input.includes('couldn\'t') ||
+        input.includes('hard time') || input.includes('difficult') ||
+        input.includes('trouble') || input.includes('crying') ||
+        input.includes('yell') || input.includes('meltdown') ||
+        input.includes('gave up') || input.includes('stressed')) {
       const insight: Insight = {
         id: `insight_${Date.now()}`,
         content: userMessage,
@@ -310,7 +368,9 @@ Continue the JTBD interview following Bob Moesta's methodology.
 
     // Detect push forces
     if (input.includes('annoyed') || input.includes('tired of') ||
-        input.includes('couldn\'t stand') || input.includes('hate')) {
+        input.includes('couldn\'t stand') || input.includes('hate') ||
+        input.includes('sick of') || input.includes('enough') ||
+        input.includes('not working') || input.includes('broken')) {
       const force: Force = {
         description: userMessage,
         intensity: 7,
@@ -322,7 +382,10 @@ Continue the JTBD interview following Bob Moesta's methodology.
 
     // Detect pull forces
     if (input.includes('attracted') || input.includes('wanted') ||
-        input.includes('excited about') || input.includes('loved the idea')) {
+        input.includes('excited about') || input.includes('loved the idea') ||
+        input.includes('looked good') || input.includes('promising') ||
+        input.includes('hope') || input.includes('help her') ||
+        input.includes('help him') || input.includes('would work')) {
       const force: Force = {
         description: userMessage,
         intensity: 7,
@@ -368,6 +431,36 @@ Continue the JTBD interview following Bob Moesta's methodology.
         capturedAt: new Date()
       };
       this.interviewData.insights.push(insight);
+    }
+
+    // Detect timeline/purchase events
+    if (input.includes('bought') || input.includes('ordered') ||
+        input.includes('purchased') || input.includes('amazon') ||
+        input.includes('decided') || input.includes('picked')) {
+      // Add as a decision timeline event
+      const existingDecision = this.interviewData.timeline.find(t => t.phase === 'decision');
+      if (!existingDecision) {
+        this.interviewData.timeline.push({
+          phase: 'decision',
+          details: userMessage,
+          context: 'Auto-captured from conversation',
+          capturedAt: new Date()
+        });
+      }
+    }
+
+    // Detect first thought / trigger events
+    if (input.includes('first time') || input.includes('realized') ||
+        input.includes('noticed') || input.includes('started to think')) {
+      const existingFirstThought = this.interviewData.timeline.find(t => t.phase === 'first_thought');
+      if (!existingFirstThought) {
+        this.interviewData.timeline.push({
+          phase: 'first_thought',
+          details: userMessage,
+          context: 'Auto-captured from conversation',
+          capturedAt: new Date()
+        });
+      }
     }
   }
 

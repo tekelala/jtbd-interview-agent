@@ -18,10 +18,19 @@ export default function InterviewChat({
 }: InterviewChatProps) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
+  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Auto-focus input when loading completes
+  useEffect(() => {
+    if (!isLoading && phase !== 'complete') {
+      inputRef.current?.focus();
+    }
+  }, [isLoading, phase]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,10 +83,13 @@ export default function InterviewChat({
         {isLoading && (
           <div style={{ ...styles.message, ...styles.assistantMessage }}>
             <div style={styles.messageRole}>Interviewer</div>
-            <div style={styles.typing}>
-              <span></span>
-              <span></span>
-              <span></span>
+            <div style={styles.typingContainer}>
+              <span style={styles.typingText}>Thinking...</span>
+              <div style={styles.typing}>
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
             </div>
           </div>
         )}
@@ -87,6 +99,7 @@ export default function InterviewChat({
 
       <form onSubmit={handleSubmit} style={styles.inputForm}>
         <input
+          ref={inputRef}
           type="text"
           className="input"
           placeholder={phase === 'complete' ? 'Interview complete' : 'Type your response...'}
@@ -94,6 +107,7 @@ export default function InterviewChat({
           onChange={e => setInput(e.target.value)}
           disabled={isLoading || phase === 'complete'}
           style={{ flex: 1 }}
+          autoFocus
         />
         <button
           type="submit"
@@ -179,6 +193,16 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.5,
     marginTop: '6px',
     textAlign: 'right'
+  },
+  typingContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  typingText: {
+    fontSize: '14px',
+    color: '#64748b',
+    fontStyle: 'italic'
   },
   typing: {
     display: 'flex',

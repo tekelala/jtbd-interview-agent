@@ -23,14 +23,21 @@ export default function SetupModal({
 }: SetupModalProps) {
   const [productContext, setProductContext] = useState('');
   const [intervieweeName, setIntervieweeName] = useState('');
+  const [isStarting, setIsStarting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onStart({
-      productContext: productContext || undefined,
-      intervieweeName: intervieweeName || undefined,
-      model: selectedModel
-    });
+    setIsStarting(true);
+    try {
+      await onStart({
+        productContext: productContext || undefined,
+        intervieweeName: intervieweeName || undefined,
+        model: selectedModel
+      });
+    } catch (error) {
+      console.error('Failed to start interview:', error);
+      setIsStarting(false);
+    }
   };
 
   return (
@@ -93,8 +100,13 @@ export default function SetupModal({
             </ul>
           </div>
 
-          <button type="submit" className="btn btn-primary" style={styles.button}>
-            Start Interview
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={styles.button}
+            disabled={isStarting}
+          >
+            {isStarting ? 'Starting Interview...' : 'Start Interview'}
           </button>
         </form>
       </div>
